@@ -23,6 +23,23 @@ VOZES_DISPONIVEIS = {
 def listar_vozes():
     return jsonify(VOZES_DISPONIVEIS)
 
+def formatar_rate(rate):
+    """Garante que o rate esteja no formato correto exigido pelo edge-tts (ex: +0%, -10%)."""
+    if not rate:
+        return "+0%"
+    
+    rate = str(rate).strip()
+    
+    # Se não tiver o sinal de + ou -, adiciona o + (resolve o problema do "0%")
+    if not (rate.startswith('+') or rate.startswith('-')):
+        rate = '+' + rate
+        
+    # Se não tiver o %, adiciona o %
+    if not rate.endswith('%'):
+        rate = rate + '%'
+        
+    return rate
+
 @app.route("/api/tts", methods=["POST"])
 def tts():
     data = request.get_json()
@@ -31,17 +48,13 @@ def tts():
         
     texto = data.get("texto", "").strip()
     voz = data.get("voz", "pt-BR-FranciscaNeural")
-    # Pega o rate, se não existir, usa -10% (mais lento)
-    rate = data.get("rate", "-10%") 
+    # Pega o rate e já formata corretamente
+    rate = formatar_rate(data.get("rate", "+0%")) 
 
     if not texto: 
         return jsonify({"erro": "Texto vazio"}), 400
     if voz not in VOZES_DISPONIVEIS: 
         return jsonify({"erro": "Voz inválida"}), 400
-
-    # Valida se o rate tem o formato correto (ex: "-10%", "+20%", "0%")
-    if not isinstance(rate, str) or '%' not in rate:
-        rate = "-10%"
 
     return processar_audio(texto, voz, rate)
 
@@ -52,15 +65,13 @@ def tts_pdf():
         
     arquivo = request.files['arquivo']
     voz = request.form.get("voz", "pt-BR-FranciscaNeural")
-    rate = request.form.get("rate", "-10%")
+    # Pega o rate e já formata corretamente
+    rate = formatar_rate(request.form.get("rate", "+0%"))
 
     if arquivo.filename == '': 
         return jsonify({"erro": "Nome de arquivo vazio"}), 400
     if voz not in VOZES_DISPONIVEIS:
         return jsonify({"erro": "Voz inválida"}), 400
-        
-    if not isinstance(rate, str) or '%' not in rate:
-        rate = "-10%"
 
     try:
         reader = PdfReader(arquivo)
@@ -72,7 +83,7 @@ def tts_pdf():
                 
         texto_extraido = texto_extraido.strip()
         
-        # Otimização de memória (Evita OOM no Render Free)
+        # Otimização de memória
         del reader
         del arquivo
         gc.collect() 
@@ -104,7 +115,6 @@ def processar_audio(texto, voz, rate):
         return jsonify({"erro": "Falha interna ao gerar o áudio. Tente novamente."}), 500
 
 async def gerar_audio(texto: str, voz: str, rate: str) -> bytes:
-    # Aplica o rate na comunicação
     communicate = edge_tts.Communicate(texto, voice=voz, rate=rate)
     audio_buffer = io.BytesIO()
     
